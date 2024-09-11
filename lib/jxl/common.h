@@ -34,6 +34,8 @@ constexpr size_t kMaxNumPasses = 11;
 constexpr size_t kMaxNumReferenceFrames = 4;
 
 enum class SpeedTier {
+  // Try an impressively exessive number of Glacier settings.
+  kHeatDeath = -2,
   // Try multiple combinations of Glacier flags for modular mode. Otherwise
   // like kGlacier.
   kTectonicPlate = -1,

@@ -379,7 +379,7 @@ struct CompressArgs {
 
     cmdline->AddOptionFlag(
         '\0', "allow_expert_options",
-        "Allow setting effort to 11 for somewhat denser lossless "
+        "Allow setting effort up to 12 for somewhat denser lossless "
         "compression at an extreme compute cost.",
         &allow_expert_options, &SetBooleanTrue, 3);
 
@@ -423,10 +423,11 @@ struct CompressArgs {
         "    Default = 14 at effort < 10 and 15 at effort 10.",
         &modular_predictor, &ParseInt64, 4);
 
-    cmdline->AddOptionValue(
-        'E', "modular_nb_prev_channels", "N",
-        "Number of extra (previous-channel) MA tree properties to use.",
-        &modular_nb_prev_channels, &ParseInt64, 4);
+    cmdline->AddOptionValue('E', "modular_nb_prev_channels", "-1..11",
+                            "Maximum number of previous-channel MA tree "
+                            "properties to use, default = -1.\n"
+                            "-1 = encoder chooses.",
+                            &modular_nb_prev_channels, &ParseInt64, 4);
 
     cmdline->AddOptionValue(
         '\0', "modular_palette_colors", "N",
@@ -715,7 +716,7 @@ void ProcessFlags(const jxl::extras::Codec codec,
       "effort", static_cast<int64_t>(args->effort),
       JXL_ENC_FRAME_SETTING_EFFORT, params, [args](int64_t x) -> std::string {
         if (args->allow_expert_options) {
-          return (1 <= x && x <= 11) ? "" : "Valid range is {1, 2, ..., 11}.";
+          return (1 <= x && x <= 12) ? "" : "Valid range is {1, 2, ..., 12}.";
         } else {
           return (1 <= x && x <= 10) ? "" : "Valid range is {1, 2, ..., 10}.";
         }

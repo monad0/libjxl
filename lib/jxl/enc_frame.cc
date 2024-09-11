@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <memory>
 #include <numeric>
 #include <utility>
@@ -2144,6 +2145,33 @@ Status EncodeFrameOneShot(JxlMemoryManager* memory_manager,
 
 }  // namespace
 
+void PrintParams(const CompressParams& cparams,
+                 const CompressParams& cparams_orig, const size_t size) {
+  fprintf(stdout, "cjxl -d 0 -e 10");
+  if (cparams.options.predictor != Predictor::Variable)
+    fprintf(stdout, " -P %d", static_cast<int>(cparams.options.predictor));
+  if (cparams.options.max_properties != cparams_orig.options.max_properties)
+    fprintf(stdout, " -E %d", cparams.options.max_properties);
+  if (cparams.options.nb_repeats != cparams_orig.options.nb_repeats)
+    fprintf(stdout, " -I %d",
+            static_cast<int>(cparams.options.nb_repeats * 100));
+  if (cparams.modular_group_size_shift != cparams_orig.modular_group_size_shift)
+    fprintf(stdout, " -g %d", cparams.modular_group_size_shift);
+  if (cparams.palette_colors != cparams_orig.palette_colors)
+    fprintf(stdout, " --modular_palette_colors %d", cparams.palette_colors);
+  if (cparams.channel_colors_percent != cparams_orig.channel_colors_percent)
+    fprintf(stdout, " -X %f", cparams.channel_colors_percent);
+  if (cparams.channel_colors_pre_transform_percent !=
+      cparams_orig.channel_colors_pre_transform_percent)
+    fprintf(stdout, " -Y %f", cparams.channel_colors_pre_transform_percent);
+  if (cparams.patches != cparams_orig.patches)
+    fprintf(stdout, " --patches %d", static_cast<int>(cparams.patches));
+  if (cparams.options.wp_tree_mode != cparams_orig.options.wp_tree_mode)
+    fprintf(stdout, " --wp_tree_mode %d",
+            static_cast<int>(cparams.options.wp_tree_mode));
+  fprintf(stdout, " %lu\n", size);
+}
+
 std::vector<CompressParams> TectonicPlateSettingsLessPalette(
     const CompressParams& cparams_orig) {
   std::vector<CompressParams> all_params;
@@ -2427,6 +2455,83 @@ Status EncodeFrame(JxlMemoryManager* memory_manager,
     } else {
       cparams = all_params_test[best_idx_test];
     }
+    PrintParams(cparams, cparams_orig, size[best_idx]);
+  }
+  if (cparams.speed_tier == SpeedTier::kHeatDeath) {
+    std::vector<CompressParams> all_params;
+    CompressParams cparams_attempt = cparams_orig;
+    cparams_attempt.speed_tier = SpeedTier::kGlacier;
+
+    for (int pred = 0; pred <= 15; ++pred) {
+      cparams_attempt.options.predictor = static_cast<Predictor>(pred);
+      for (int e : {0, 1, 2, 11}) {
+        cparams_attempt.options.max_properties = e;
+        for (int g : {0, 1, 2, 3}) {
+          cparams_attempt.modular_group_size_shift = g;
+          for (Override patches : {Override::kDefault, Override::kOff}) {
+            cparams_attempt.patches = patches;
+            for (float x : {0.0f, 80.f, 100.f}) {
+              cparams_attempt.channel_colors_percent = x;
+              for (float y : {0.0f, 95.0f, 100.f}) {
+                cparams_attempt.channel_colors_pre_transform_percent = y;
+                for (int K : {0, 1 << 10, 10000, 70000}) {
+                  cparams_attempt.palette_colors = K;
+                  for (float iter :
+                       {0.0f,  0.01f, 0.02f, 0.03f, 0.1f,  0.2f,  0.3f, 0.4f,
+                        0.5f,  0.6f,  0.7f,  0.8f,  0.84f, 0.88f, 0.9f, 0.92f,
+                        0.94f, 0.96f, 0.97f, 0.98f, 0.99f, 1.0f}) {
+                    cparams_attempt.options.nb_repeats = iter;
+                    if (pred == 6 || pred == 14) {
+                      cparams_attempt.options.wp_tree_mode =
+                          ModularOptions::TreeMode::kDefault;
+                      all_params.push_back(cparams_attempt);
+                    } else {
+                      for (int tree_mode :
+                           {static_cast<int>(ModularOptions::TreeMode::kNoWP),
+                            static_cast<int>(
+                                ModularOptions::TreeMode::kDefault)}) {
+                        cparams_attempt.options.wp_tree_mode =
+                            static_cast<ModularOptions::TreeMode>(tree_mode);
+                        all_params.push_back(cparams_attempt);
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    std::vector<size_t> size;
+    size.resize(all_params.size());
+    fprintf(stdout, "Trying %zu configurations, please be patient ...\n",
+            all_params.size());
+    const auto process_variant = [&](size_t task, size_t) -> Status {
+      std::vector<uint8_t> output(64);
+      uint8_t* next_out = output.data();
+      size_t avail_out = output.size();
+      JxlEncoderOutputProcessorWrapper local_output(memory_manager);
+      JXL_RETURN_IF_ERROR(local_output.SetAvailOut(&next_out, &avail_out));
+      JXL_RETURN_IF_ERROR(EncodeFrame(memory_manager, all_params[task],
+                                      frame_info, metadata, frame_data, cms,
+                                      nullptr, &local_output, aux_out));
+      size[task] = local_output.CurrentPosition();
+      return true;
+    };
+    JXL_RETURN_IF_ERROR(RunOnPool(pool, 0, all_params.size(),
+                                  ThreadPool::NoInit, process_variant,
+                                  "Compress kHeatDeath"));
+
+    size_t best_idx = 0;
+    for (size_t i = 1; i < all_params.size(); i++) {
+      if (size[best_idx] > size[i]) {
+        best_idx = i;
+      }
+    }
+    cparams = all_params[best_idx];
+    PrintParams(cparams, cparams_orig, size[best_idx]);
   }
 
   JXL_RETURN_IF_ERROR(ParamsPostInit(&cparams));
