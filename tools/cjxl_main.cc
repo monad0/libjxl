@@ -1202,13 +1202,8 @@ int main(int argc, char** argv) {
     }
   }
   if (!args.quiet) {
-    if (compressed_size < 100000) {
-      cmdline.VerbosePrintf(0, "Compressed to %" PRIuS " bytes ",
-                            compressed_size);
-    } else {
-      cmdline.VerbosePrintf(0, "Compressed to %.1f kB ",
-                            compressed_size * 0.001);
-    }
+    cmdline.VerbosePrintf(0, "Compressed to %" PRIuS " bytes ",
+                          compressed_size);
     // For lossless jpeg-reconstruction, we don't print some stats, since we
     // don't have easy access to the image dimensions.
     if (args.container == jxl::Override::kOn) {
